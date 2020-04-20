@@ -10,7 +10,10 @@ import (
 
 var watches map[inotify.Wd]string
 var inot *inotify.Inotify
+const outputfile = "directory.html"
 // how is this intended to be dealt with
+
+// stop using this inotify package and write it single threaded
 
 func main() {
 	var basedir string = os.Args[1]
@@ -35,10 +38,44 @@ func main() {
 			return
 		}
 		changedDir = watches[event.Wd]
-		writeHTML(changedDir)
 		// have to check if a new directory has been added, and if so add a watch for it
-		
+		// for each member of directory, if not inMap, add watch
+		files, err := ioutil.ReadDir(changedDir)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		watchNewDirs(watches, changedDir, files)
+
+		var html string = makeHTML(changedDir, files)
+		fmt.Println(html)
+		err = writeFile(changedDir+"/"+outputfile, html)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
 	}
+}
+
+func watchNewDirs(watches map[inotify.Wd]string, changedDir string, files []os.FileInfo) {
+	//var path string
+	for _, file := range files {
+		path := changedDir + "/" + file.Name()
+		if file.IsDir() && ! inMap(watches, path) {
+			addWatch(watches, path)
+			// maybe run .html file creation on this dir right now?
+			// is it possible that could have missed file creation inside the dir?
+		}
+	}
+}
+
+func inMap(m map[inotify.Wd]string, v string) bool {
+	for _, value := range m {
+		if (value == v) {
+			return true
+		}
+	}
+	return false
 }
 
 func buildWatches(directory string) (error) {
@@ -46,19 +83,14 @@ func buildWatches(directory string) (error) {
 	return filepath.Walk(directory, walkAddWatch)
 }
 
-func writeHTML(directory string) error {
-	files, err := ioutil.ReadDir(directory)
-	if err != nil {
-		return err
-	}
+/*
+func writeHTML(directory string, files []os.FileInfo) error {
+	
 	var html string = makeHTML(directory, files)
 	fmt.Println(html)
-	err = writeFile(directory+"/"+"directory.html", html)
-	if err != nil {
-		return err
-	}
-	return nil
-}
+	err := writeFile(directory+"/"+outputfile, html)
+	return err
+}*/
 
 func writeFile(location string, contents string) error {
 	/*file, err := os.OpenFile(location, os.O_WRONLY | os.O_TRUNC, 0)
@@ -85,10 +117,11 @@ func writeFile(location string, contents string) error {
 	return nil
 }
 
+// second loop through files list
 func makeHTML(directory string, files []os.FileInfo) string {
 	var html string = "<html><head></head><body>\n"
 	for _, file := range files {
-		if file.Mode()&os.ModeSymlink == 0 {
+		if file.Mode()&os.ModeSymlink == 0 && file.Name() != outputfile{
 			var path string = directory + "/" + file.Name()
 			html += "<a href=" + path + ">" + file.Name() + "</a><br>"
 		}
@@ -99,11 +132,16 @@ func makeHTML(directory string, files []os.FileInfo) string {
 
 func walkAddWatch(path string, info os.FileInfo, err error) error {
 	if info.IsDir() {
-		wd, err := inot.AddWatch(path, inotify.IN_CREATE|inotify.IN_ATTRIB|inotify.IN_DELETE /*| inotify.IN_MODIFY*/ |inotify.IN_MOVED_TO|inotify.IN_MOVED_FROM|inotify.IN_ONLYDIR)
-		if err != nil {
-			return err
-		}
-		watches[wd] = path
+		return addWatch(watches, path)
 	}
+	return nil
+}
+
+func addWatch(watches map[inotify.Wd]string, path string) error {
+	wd, err := inot.AddWatch(path, inotify.IN_CREATE|inotify.IN_ATTRIB|inotify.IN_DELETE /*| inotify.IN_MODIFY*/ |inotify.IN_MOVED_TO|inotify.IN_MOVED_FROM|inotify.IN_ONLYDIR)
+	if err != nil {
+		return err
+	}
+	watches[wd] = path
 	return nil
 }
