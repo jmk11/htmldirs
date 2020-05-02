@@ -10,6 +10,7 @@
 //		if the event is a delete or movedfrom, removes watches from the directory and all its subdirectories recursively
 //		if the event is an ignored, removes wataches from the directory and all its subdirectories if the directory is still being watched
 
+// works better than inotifywait for pasting large, deep directory
 
 package recursivedirwatch
 
