@@ -2,6 +2,15 @@
 // subdirectories added while this is running are also watched
 // Returns inotify events with the watch descriptor replaced with path of edited directory
 
+// When Dirwatch receives an inotify event:
+// 	if the created/removed/attribd file is not a directory, it sends an event for the parent directory
+// 	if it is a directory:
+// 		if the event is a create or moveto, adds a watch on the directory and all new subdirectories recursively, 
+// 			and sends events for the parent directory, the directory and all new subdirectories recursively
+//		if the event is a delete or movedfrom, removes watches from the directory and all its subdirectories recursively
+//		if the event is an ignored, removes wataches from the directory and all its subdirectories if the directory is still being watched
+
+
 package recursivedirwatch
 
 import (
@@ -86,7 +95,8 @@ func readevent(event inotify.Event, ch chan DirEvent) *DirEvent {
 		// but remove from watches map
 		// results in doubling because when I delete the watch, in_ignored is generated
 		if ok { // subdirs not already removed
-			// race condition? could watches[event.Wd] already have been reset? no
+			// race condition? could watches[event.Wd] already have been reset?
+			// no becuase we received this notification so the wd is still being used for the ignored directory
 			fmt.Println("Deleting:", changedDir)
 			deleteWatches(watches, changedDir)
 			// I could just delete here instead of using if delete block below
