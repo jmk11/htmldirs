@@ -24,16 +24,18 @@ func main() {
 	ch := make(chan recursivedirwatch.DirEvent, 5)
 	go recursivedirwatch.Dirwatch(basedir, ch)
 	for direvent := range ch {
-		fmt.Println("Making HTML for", direvent.Dirname)
-		files, err := ioutil.ReadDir(direvent.Dirname)
-		if err != nil {
-			fmt.Println(err)
-		} else {
-			var html string = makeHTML(direvent.Dirname, files)
-			//fmt.Println(html)
-			err = writeFile(direvent.Dirname+"/"+outputfilename, html)
+		if direvent.Name == nil || *direvent.Name != outputfilename {
+			fmt.Println("Making HTML for", direvent.Dirname)
+			files, err := ioutil.ReadDir(direvent.Dirname)
 			if err != nil {
 				fmt.Println(err)
+			} else {
+				var html string = makeHTML(direvent.Dirname, files)
+				//fmt.Println(html)
+				err = writeFile(direvent.Dirname+"/"+outputfilename, html)
+				if err != nil {
+					fmt.Println(err)
+				}
 			}
 		}
 	}

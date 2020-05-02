@@ -106,7 +106,7 @@ func readevent(event inotify.Event, ch chan DirEvent) *DirEvent {
 		assert(ok, "watches[event.Wd] not ok in readevent(). changedDir = "+changedDir)
 		//fmt.Println("else")
 		//fmt.Println(err)
-		fmt.Println(watches)
+		//fmt.Println(watches)
 		if event.Mask&inotify.IN_ISDIR != 0 && event.Mask&inotify.IN_ATTRIB == 0 { // edited file is a directory
 			endDir := changedDir + "/" + *event.Name
 			if event.Mask&inotify.IN_DELETE != 0 || event.Mask&inotify.IN_MOVED_FROM != 0 {
