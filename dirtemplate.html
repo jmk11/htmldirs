@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <style>
+        .filetype {
+            width: 70px;
+            text-align: left
+        }
+        .filename {
+            text-align: left;
+            width: 600px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding-right: 20px;
+        }
+        .filesize {
+            width: 90px;
+        }
+        .filesizecontent {
+            text-align: right;
+            padding-right: 30px
+        }
+        .lastmodified {
+            text-align: left
+        }
+    </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Dirname}}</title>
+</head>
+<body>
+    <p><h3>
+        {{.Dirname}}
+    </h3></p>
+    <table width=100% style="table-layout: fixed;">
+        <tr>
+            <th class="filetype">File type</th>
+            <th class="filename">Name</th>
+            <th class="filesize">Size</th>
+            <th class="lastmodified">Last Modified</th>
+        </tr>
+        {{range .Files}}
+        <tr>
+            <td class="filetype">{{.Filetype}}</td>
+            <td class="filename"><a href="{{.Link}}">{{.Name}}</a></td>
+            <td class="filesize filesizecontent">{{.Size}}</td>
+            <td class="lastmodified">{{.LastModified}}</td>
+        </tr>
+        {{end}}
+    </table>
+</body>
+</html>
