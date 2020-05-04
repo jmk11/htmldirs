@@ -87,35 +87,43 @@ func buildTemplateInputs(directory string, files []os.FileInfo) templatedir {
 	// and then create a slice of the part of that that is actually used before passing to template
 	// should be faster than making a new slice over and over again
 	// you don't have to do that in go - just provide capacity for slice and it will do that work for you
+	var filesize string
 	for _, file := range files {
 		filename := file.Name()
 		if file.Mode()&os.ModeSymlink == 0 && filename != outputfilename && isReadable(directory, file) {
 			// actually I probably do want to include symlinks
 			if file.IsDir() {
 				filetype = "DIR"
+				filesize = ""
 			} else {
 				filetype = "FILE"
+				filesize = filesizestr(uint(math.Ceil(float64(file.Size()) / 1024))) // num kilobytes
+				// how do I know file.Size() / 1024 fits in float64
+				// fmt.Println(filesizenum)
 			}
-			filesizenum := int(math.Ceil(float64(file.Size()) / 1024)) // num kilobytes
-			var filesize string
-			fmt.Println(filesizenum)
-			switch {
-			case filesizenum < 1024:
-				filesize = fmt.Sprintf("%dKB", filesizenum)
-			case filesizenum < 1024*1024:
-				filesize = fmt.Sprintf("%dMB", filesizenum/1024)
-			case filesizenum < 1024*1024*1024:
-				filesize = fmt.Sprintf("%dGB", filesizenum/(1024*1024))
-			default:
-				filesize = fmt.Sprintf("%dTB", filesizenum/(1024*1024*1024))
-			}
-			// test the sizes with big fake inputs
-			// the numbers printed seem to be a big wrong eg 16MB when computer says 17.2
 			lastmodified := file.ModTime().Format("02-Jan-2006	15:04:05 MST")
-			templatedirv.Files = append(templatedirv.Files, templatefile{filetype, filename, directory + "/" + filename, filesize, lastmodified})
+			var link = directory + "/" + filename
+			templatedirv.Files = append(templatedirv.Files, templatefile{filetype, filename, link, filesize, lastmodified})
 		}
 	}
 	return templatedirv
+}
+
+func filesizestr(filesizenum uint) string {
+	var filesize string
+	switch {
+	case filesizenum < 1024:
+		filesize = fmt.Sprintf("%dKB", filesizenum)
+	case filesizenum < 1024*1024:
+		filesize = fmt.Sprintf("%dMB", filesizenum/1024)
+	case filesizenum < 1024*1024*1024:
+		filesize = fmt.Sprintf("%dGB", filesizenum/(1024*1024))
+	default:
+		filesize = fmt.Sprintf("%dTB", filesizenum/(1024*1024*1024))
+	}
+	return filesize
+	// test the sizes with big fake inputs
+	// the numbers printed seem to be a big wrong eg 16MB when computer says 17.2
 }
 
 func writeTemplate(location string, tmpl *template.Template, dir templatedir) error {
