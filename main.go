@@ -39,7 +39,7 @@ func main() {
 	//var files []os.FileInfo
 
 	var tmpl = template.Must(template.New("dirtemplate.html").ParseFiles("dirtemplate.html"))
-	ch := make(chan recursivedirwatch.Event, 5)
+	ch := make(chan recursivedirwatch.Event, 5) // Uber's go style guide says don't use buffered channels but I don't understand why
 	go recursivedirwatch.Watch(basedir, ch)
 	var dir templatedir
 	for event := range ch {
