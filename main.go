@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"math"
 	"os"
+	"strings"
 )
 
 // name
@@ -33,6 +34,7 @@ func main() {
 	}
 	var basedir string = os.Args[1]
 	fmt.Println("Program is starting. Directory:", basedir)
+	// basedirectory must be absolute?
 
 	//var err error = nil // This would get compiled out right becauase already inititalised right?
 	//var direvent recursivedirwatch.DirEvent
@@ -49,7 +51,8 @@ func main() {
 			if err != nil {
 				fmt.Println(err)
 			} else {
-				dir = buildTemplateInputs(event.Dirname, files)
+				dirname, err := makeRelative(basedir, event.Dirname)
+				dir = buildTemplateInputs(dirname, files)
 				err = writeTemplate(event.Dirname+"/"+outputfilename, tmpl, dir)
 				if err != nil {
 					fmt.Println(err)
@@ -71,6 +74,7 @@ func main() {
 
 // return slice starting at character after last delim
 // if last character is delim or delim isn't in string at all, return empty string
+/*
 func stringAfterLast(src string, delim byte) string {
 	for i := len(src) - 2; i >= 0; i-- {
 		if src[i] == delim {
@@ -79,10 +83,17 @@ func stringAfterLast(src string, delim byte) string {
 	}
 	return ""
 }
+*/
+
+// relative paths require that the uri ends in / for the browser to process them properly
+// so what Apache does is redirect you to the uri ending in / if you are looking for a directory
+// Or could make all links relative to base
+
+// html: doesn't display properly when 
 
 func buildTemplateInputs(directory string, files []os.FileInfo) templatedir {
 	var filetype string
-	templatedirv := templatedir{stringAfterLast(directory, '/'), make([]templatefile, 0, len(files))}
+	templatedirv := templatedir{directory, make([]templatefile, 0, len(files))}
 	// could make templatefiles.files an array of same size as files slice because won't be bigger
 	// and then create a slice of the part of that that is actually used before passing to template
 	// should be faster than making a new slice over and over again
@@ -102,11 +113,30 @@ func buildTemplateInputs(directory string, files []os.FileInfo) templatedir {
 				// fmt.Println(filesizenum)
 			}
 			lastmodified := file.ModTime().Format("02-Jan-2006	15:04:05 MST")
-			var link = directory + "/" + filename
+			var link string
+			if directory == "" {
+				link = filename
+			} else {
+				link = "/" + directory + "/" + filename
+			}
 			templatedirv.Files = append(templatedirv.Files, templatefile{filetype, filename, link, filesize, lastmodified})
 		}
 	}
 	return templatedirv
+}
+
+/*
+* 
+*/
+func makeRelative(basedir string, dirpath string) (string, error) {
+	// if basedir is prefix of dirpath, return dirpath - basedir
+	relative := strings.Split(dirpath, basedir + "/")
+	if len(relative) == 1 {
+		return "", nil
+	} else {
+		fmt.Println(relative)
+		return relative[1], nil
+	}
 }
 
 func filesizestr(filesizenum uint) string {
