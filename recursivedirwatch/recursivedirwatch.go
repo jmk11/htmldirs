@@ -140,6 +140,9 @@ func readevent(event inotify.Event, _ch chan Event) *Event {
 	changedDir, ok := watches[event.Wd]
 	fmt.Println(changedDir)
 	//if event.Mask&inotify.IN_IGNORED != 0 || event.Mask&inotify.IN_MOVE_SELF != 0 || event.Mask&inotify.IN_DELETE_SELF != 0 {
+	if event.Mask&inotify.IN_Q_OVERFLOW != 0 {
+		return nil
+	}
 	if event.Mask&inotify.IN_IGNORED != 0 {
 		// selfs are dealt with by delete_from, moved_from in parent
 		// not dealing with root itself being moved atm
