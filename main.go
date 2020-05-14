@@ -38,15 +38,16 @@ const gb uint = 1024*mb
 const tb uint = 1024*gb*/
 
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Println("Usage:", os.Args[0], "basedirectory")
+	if len(os.Args) != 2 && len(os.Args) != 3 {
+		fmt.Println("Usage:", os.Args[0], "[-all] basedirectory")
 		return
 	}
-	var basedir string = os.Args[1]
+	var basedir string = os.Args[len(os.Args)-1]
 	fmt.Println("Program is starting. Directory:", basedir)
 	// basedirectory must be absolute?
 	var regenall *bool = flag.Bool("all", false, "Regenerate all files before setting watches")
 	flag.Parse()
+	fmt.Println(*regenall)
 
 	//var err error = nil // This would get compiled out right becauase already inititalised right?
 	//var direvent recursivedirwatch.DirEvent
@@ -140,9 +141,9 @@ func filesizestr(filesizenum int64) string {
 	case filesizenum < gb:
 		filesize = fmt.Sprintf("%vMB", math.Ceil(float64(filesizenum)/mb))
 	case filesizenum < tb:
-		filesize = fmt.Sprintf("%vGB", math.Ceil(float64(filesizenum)/gb))
+		filesize = fmt.Sprintf("%.1fGB", float64(filesizenum)/gb)
 	default:
-		filesize = fmt.Sprintf("%vTB", math.Ceil(float64(filesizenum)/tb))
+		filesize = fmt.Sprintf("%.1fTB", float64(filesizenum)/tb)
 	}
 	return filesize
 	// test the sizes with big fake inputs

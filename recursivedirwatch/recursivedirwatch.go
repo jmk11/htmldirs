@@ -120,8 +120,6 @@ func isSubdir(basedir string, dirname string) bool {
 // Maybe I should make a second hash table hashed in the opposite direction
 // prob not worth it
 func deleteWatches(watches map[inotify.Wd]string, basedir string) {
-	//delete(watches, event.Wd)
-	// delete watches recursively
 	// can't do with filepath.Walk() because the directories don't exist anymore...
 	// so have to do based on file names
 	for wd, dirname := range watches {
@@ -256,6 +254,8 @@ func buildWatches(directory string) error {
 }
 */
 
+// maybe use a closure so don't have to make ch and watches global?
+// deal with err?
 func walkAddWatch(path string, info os.FileInfo, err error) error {
 	if info.IsDir() {
 		if sendoninitial {
