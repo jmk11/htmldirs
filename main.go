@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"html/template"
 	"htmldir/recursivedirwatch"
@@ -26,6 +27,15 @@ type templatefile struct {
 }
 
 const outputfilename = ".directory.html"
+const kb = 1024
+const mb = 1024 * 1024
+const gb = 1024 * 1024 * 1024
+const tb = 1024 * 1024 * 1024 * 1024
+
+/*const kb uint = 1024
+const mb uint = 1024*kb
+const gb uint = 1024*mb
+const tb uint = 1024*gb*/
 
 func main() {
 	if len(os.Args) != 2 {
@@ -35,72 +45,45 @@ func main() {
 	var basedir string = os.Args[1]
 	fmt.Println("Program is starting. Directory:", basedir)
 	// basedirectory must be absolute?
+	var regenall *bool = flag.Bool("all", false, "Regenerate all files before setting watches")
+	flag.Parse()
 
 	//var err error = nil // This would get compiled out right becauase already inititalised right?
 	//var direvent recursivedirwatch.DirEvent
 	//var files []os.FileInfo
 
-	var tmpl = template.Must(template.New("dirtemplate.html").ParseFiles("dirtemplate.html"))
-	ch := make(chan recursivedirwatch.Event, 5) // Uber's go style guide says don't use buffered channels but I don't understand why
-	go recursivedirwatch.Watch(basedir, ch)
-	var dir templatedir
+	var tmpl *template.Template = template.Must(template.New("dirtemplate.html").ParseFiles("dirtemplate.html"))
+
+	var ch chan recursivedirwatch.Event = make(chan recursivedirwatch.Event, 5) // Uber's go style guide says don't use buffered channels but I don't understand why
+	go recursivedirwatch.Watch(basedir, ch, *regenall)
 	for event := range ch {
 		if event.Name == nil || *event.Name != outputfilename {
-			fmt.Println("Making HTML for", event.Dirname)
-			files, err := ioutil.ReadDir(event.Dirname)
+			fmt.Println("Making HTML for", event.Dirpath)
+			var files, err = ioutil.ReadDir(event.Dirpath)
 			if err != nil {
 				fmt.Println(err)
 			} else {
-				dirname, err := makeRelative(basedir, event.Dirname)
-				dir = buildTemplateInputs(dirname, files)
-				err = writeTemplate(event.Dirname+"/"+outputfilename, tmpl, dir)
+				var dirname, err = makeRelative(basedir, event.Dirpath)
+				var dir templatedir = buildTemplateInputs(dirname, files)
+				err = writeTemplate(event.Dirpath+"/"+outputfilename, tmpl, dir)
 				if err != nil {
 					fmt.Println(err)
 				}
-				/*err = writeHTML(direvent.Dirname, files)
-				if err != nil {
-					fmt.Println(err)
-				}*/
-				/*var html string = makeHTML(direvent.Dirname, files)
-				//fmt.Println(html)
-				err = writeFile(direvent.Dirname+"/"+outputfilename, html)
-				if err != nil {
-					fmt.Println(err)
-				}*/
 			}
 		}
 	}
 }
 
-// return slice starting at character after last delim
-// if last character is delim or delim isn't in string at all, return empty string
-/*
-func stringAfterLast(src string, delim byte) string {
-	for i := len(src) - 2; i >= 0; i-- {
-		if src[i] == delim {
-			return src[i+1:]
-		}
-	}
-	return ""
-}
-*/
-
 // relative paths require that the uri ends in / for the browser to process them properly
 // so what Apache does is redirect you to the uri ending in / if you are looking for a directory
 // Or could make all links relative to base
 
-// html: doesn't display properly when 
-
 func buildTemplateInputs(directory string, files []os.FileInfo) templatedir {
 	var filetype string
-	templatedirv := templatedir{directory, make([]templatefile, 0, len(files))}
-	// could make templatefiles.files an array of same size as files slice because won't be bigger
-	// and then create a slice of the part of that that is actually used before passing to template
-	// should be faster than making a new slice over and over again
-	// you don't have to do that in go - just provide capacity for slice and it will do that work for you
+	var templatedirv templatedir = templatedir{directory, make([]templatefile, 0, len(files))}
 	var filesize string
 	for _, file := range files {
-		filename := file.Name()
+		var filename string = file.Name()
 		if file.Mode()&os.ModeSymlink == 0 && filename != outputfilename && isReadable(directory, file) {
 			// actually I probably do want to include symlinks
 			if file.IsDir() {
@@ -108,14 +91,15 @@ func buildTemplateInputs(directory string, files []os.FileInfo) templatedir {
 				filesize = ""
 			} else {
 				filetype = "FILE"
-				filesize = filesizestr(uint(math.Ceil(float64(file.Size()) / 1024))) // num kilobytes
+				//filesize = filesizestr(uint(math.Ceil(float64(file.Size()) / 1024))) // num kilobytes
+				filesize = filesizestr(file.Size())
 				// how do I know file.Size() / 1024 fits in float64
 				// fmt.Println(filesizenum)
 			}
-			lastmodified := file.ModTime().Format("02-Jan-2006	15:04:05 MST")
+			var lastmodified string = file.ModTime().Format("02-Jan-2006  15:04:05 MST")
 			var link string
 			if directory == "" {
-				link = filename
+				link = "/" + filename
 			} else {
 				link = "/" + directory + "/" + filename
 			}
@@ -126,11 +110,13 @@ func buildTemplateInputs(directory string, files []os.FileInfo) templatedir {
 }
 
 /*
-* 
+ Find a better way of doing this
 */
 func makeRelative(basedir string, dirpath string) (string, error) {
 	// if basedir is prefix of dirpath, return dirpath - basedir
-	relative := strings.Split(dirpath, basedir + "/")
+	// return a slice of string following basedir prefix
+	// splitafter?
+	var relative []string = strings.Split(dirpath, basedir+"/")
 	if len(relative) == 1 {
 		return "", nil
 	} else {
@@ -139,25 +125,33 @@ func makeRelative(basedir string, dirpath string) (string, error) {
 	}
 }
 
-func filesizestr(filesizenum uint) string {
+/*
+ filesizenum is number of bytes
+*/
+func filesizestr(filesizenum int64) string {
 	var filesize string
+	//uint(math.Ceil(float64(file.Size()) / 1024)))
+	// how know fits in float64
 	switch {
-	case filesizenum < 1024:
-		filesize = fmt.Sprintf("%dKB", filesizenum)
-	case filesizenum < 1024*1024:
-		filesize = fmt.Sprintf("%dMB", filesizenum/1024)
-	case filesizenum < 1024*1024*1024:
-		filesize = fmt.Sprintf("%dGB", filesizenum/(1024*1024))
+	case filesizenum < kb:
+		filesize = fmt.Sprintf("%d", filesizenum)
+	case filesizenum < mb:
+		filesize = fmt.Sprintf("%vKB", math.Ceil(float64(filesizenum)/kb))
+	case filesizenum < gb:
+		filesize = fmt.Sprintf("%vMB", math.Ceil(float64(filesizenum)/mb))
+	case filesizenum < tb:
+		filesize = fmt.Sprintf("%vGB", math.Ceil(float64(filesizenum)/gb))
 	default:
-		filesize = fmt.Sprintf("%dTB", filesizenum/(1024*1024*1024))
+		filesize = fmt.Sprintf("%vTB", math.Ceil(float64(filesizenum)/tb))
 	}
 	return filesize
 	// test the sizes with big fake inputs
 	// the numbers printed seem to be a big wrong eg 16MB when computer says 17.2
+	// I changed it a bit since then, try again
 }
 
 func writeTemplate(location string, tmpl *template.Template, dir templatedir) error {
-	var file, err = os.Create(location) // why doesn't this cause inotify infinite loop
+	var file, err = os.Create(location) // why didn't this cause inotify infinite loop when modidy was accepted
 	if err != nil {
 		return err
 	}
@@ -176,87 +170,3 @@ func isReadable(dir string, file os.FileInfo) bool {
 	// Linux has access() and euidaccess()
 	return true
 }
-
-/*
-func writeHTML(directory string, files []os.FileInfo) error {
-
-	var html string = makeHTML(directory, files)
-	fmt.Println(html)
-	err := writeFile(directory+"/"+outputfile, html)
-	return err
-}*/
-
-// func writeHTML(directory string, files []os.FileInfo, template *template.Template) error {
-// 	var filetype string
-// 	templatedirv := templatedir{directory, make([]templatefile)}
-// 	// could make templatefiles.files an array of same size as files slice because won't be bigger
-// 	// and then create a slice of the part of that that is actually used before passing to template
-// 	// should be faster than making a new slice over and over again
-// 	for _, file := range files {
-// 		if file.Mode()&os.ModeSymlink == 0 && file.Name() != outputfilename && isReadable(directory, file) {
-// 			// actually I probably do want to include symlinks
-// 			if file.IsDir() {
-// 				filetype = "DIR"
-// 			} else {
-// 				filetype = "FILE"
-// 			}
-// 			templatedirv.files = append(templatedirv.files, templatefile{filetype, file.Name(), file.Size(), "Some time"})
-// 		}
-// 	}
-// 	filewriter := bufio.NewWriter()
-// 	template.Execute(filewriter, templatedirv)
-// }
-
-// second loop through files list - combine this and watchNewDirs?
-// use html/templates
-// why waste time writing to buffer just to write it to file
-// func makeHTML(directory string, files []os.FileInfo) string {
-// 	var filetype string
-// 	templatedirv := templatedir{directory, make([]templatefile)}
-// 	// could make templatefiles.files an array of same size as files slice because won't be bigger
-// 	// and then create a slice of the part of that that is actually used before passing to template
-// 	// should be faster than making a new slice over and over again
-// 	for _, file := range files {
-// 		if file.Mode()&os.ModeSymlink == 0 && file.Name() != outputfilename && isReadable(directory, file) {
-// 			// actually I probably do want to include symlinks
-// 			if file.IsDir() {
-// 				filetype = "DIR"
-// 			} else {
-// 				filetype = "FILE"
-// 			}
-// 			templatedirv.files = append(templatedirv.files, templatefile{filetype, file.Name(), file.Size(), "Some time"})
-// 		}
-// 	}
-// 	return html
-// }
-
-// func writeFile(location string, contents string) error {
-// 	file, err := os.Create(location) // why doesn't this cause inotify infinite loop
-// 	if err != nil {
-// 		return err
-// 	}
-// 	_, err = file.WriteString(contents)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	err = file.Close()
-// 	return err
-// 	/*if err != nil {
-// 		return err
-// 	}
-// 	return nil*/
-// }
-
-/*
-func makeHTML(directory string, files []os.FileInfo) string {
-	var html string = "<html><head></head><body>\n"
-	for _, file := range files {
-		if file.Mode()&os.ModeSymlink == 0 && file.Name() != outputfilename && isReadable(directory, file) {
-			var path string = directory + "/" + file.Name()
-			html += "<a href=" + path + ">" + file.Name() + "</a><br>"
-		}
-	}
-	html += "</body></html>"
-	return html
-}
-*/
