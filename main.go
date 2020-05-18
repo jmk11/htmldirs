@@ -8,6 +8,7 @@ import (
 	"htmldir/recursivedirwatch"
 	"io/ioutil"
 	"math"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -52,6 +53,7 @@ func main() {
 	fmt.Println(*regenall)
 	fmt.Println(*exit)
 
+	// Remove trailing slash from dirname
 	if len(basedir) > 1 && basedir[len(basedir)-1] == '/' {
 		basedir = basedir[:len(basedir)-1]
 	}
@@ -118,7 +120,16 @@ func buildTemplateInputs(directory string, files []os.FileInfo) templatedir {
 			} else {
 				link = "/" + directory + "/" + filename
 			}
-			templatedirv.Files = append(templatedirv.Files, templatefile{filetype, filename, link, filesize, lastmodified})
+			//fmt.Println(url.PathEscape(link))
+
+			urlurl, err := url.Parse(link)
+			if err != nil {
+				panic("boom")
+			}
+			//urlurl.Path += link
+			//fmt.Printf("Encoded URL is %q\n", urlurl.String())
+
+			templatedirv.Files = append(templatedirv.Files, templatefile{filetype, filename, urlurl.String(), filesize, lastmodified})
 		}
 	}
 	return templatedirv

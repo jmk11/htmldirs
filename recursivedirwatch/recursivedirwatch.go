@@ -272,6 +272,10 @@ func buildWatches(directory string) error {
 // maybe use a closure so don't have to make ch and watches global?
 // deal with err?
 func walkAddWatch(path string, info os.FileInfo, err error) error {
+	if err != nil {
+		fmt.Println(err)
+		return nil
+	}
 	if info.IsDir() {
 		if sendoninitial {
 			ch <- manufactureEvent(path)
