@@ -88,9 +88,14 @@ func main() {
 // Or could make all links relative to base
 
 func buildTemplateInputs(directory string, files []os.FileInfo) templatedir {
+	//fmt.Println(directory)
+	//fmt.Println(stringUpToLast(directory, '/'))
 	var filetype string
 	var templatedirv templatedir = templatedir{directory, make([]templatefile, 0, len(files))}
 	var filesize string
+	if directory != "" {
+		templatedirv.Files = append(templatedirv.Files, templatefile{"DIR", "../", "/" + stringUpToLast(directory, '/'), "", ""})
+	}	
 	for _, file := range files {
 		var filename string = file.Name()
 		if file.Mode()&os.ModeSymlink == 0 && filename != outputfilename && isReadable(directory, file) {
@@ -179,4 +184,15 @@ func isReadable(dir string, file os.FileInfo) bool {
 	// but also checking all groups the user is in and if any of them have access
 	// Linux has access() and euidaccess()
 	return true
+}
+
+// Return string up to, but not including, last instance of character 'end' in str
+// If 'end' never appears, return empty string
+func stringUpToLast(str string, end byte) string {
+	for i := len(str) - 1; i > 0; i-- {
+		if str[i] == end {
+			return str[:i]
+		}
+	}
+	return ""
 }
