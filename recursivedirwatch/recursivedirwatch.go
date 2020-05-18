@@ -46,6 +46,15 @@ var ch chan Event
 // if a directory with deep subdirectories and files is pasted, you probably won't get to put watches on the subdirectories
 // before their subdirectories are created
 
+/*
+// Argument to Watch - 
+const (
+    NoInitial = iota
+    Send
+	SendAndExit
+)
+*/
+
 // Watch must be run as a goroutine.
 //
 // Watch will recursively watch basedir and all its subdirectories, including newly added ones
@@ -53,8 +62,9 @@ var ch chan Event
 // Some events, representing new subdirectories B, C that were added to a new directory A before directory A could be watched,
 // are created by this package ('manufactured events'), not by inotify. These are marked with a mask value of 0.
 // if sendoninitial is true, a manufactured event will be sent for each directory discovered in the initial filepath walk.
-// will close the channel and finish only on error.
-func Watch(basedir string, _ch chan Event, _sendoninitial bool) {
+// If exit is true and sendoninitial is true, will finish after initial filepath walk
+// otherwise, will close the channel and finish only on error.
+func Watch(basedir string, _ch chan Event, _sendoninitial bool, exit bool) {
 	var err error
 	ch = _ch
 	sendoninitial = _sendoninitial
@@ -75,7 +85,7 @@ func Watch(basedir string, _ch chan Event, _sendoninitial bool) {
 	err = filepath.Walk(basedir, walkAddWatch)
 	if err != nil {
 		fmt.Println(err)
-	} else {
+	} else if sendoninitial == false || exit == false {
 		for err == nil {
 			fmt.Println("Blocking on reading watches...")
 			event, err := inot.ReadBlock()
@@ -93,6 +103,8 @@ func Watch(basedir string, _ch chan Event, _sendoninitial bool) {
 		}
 		fmt.Println(err)
 	}
+	// TODO: remove watches when exit provided - or don't put on in first place
+	// maybe in case of exit, shouldn't use this at all but just use a filepath walk in main.go
 	close(ch)
 	fmt.Printf("\n\nEXITING DIRWATCH AND ABOUT TO DO DEFERS\n\n")
 }
