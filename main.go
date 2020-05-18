@@ -38,16 +38,24 @@ const gb uint = 1024*mb
 const tb uint = 1024*gb*/
 
 func main() {
-	if len(os.Args) != 2 && len(os.Args) != 3 {
-		fmt.Println("Usage:", os.Args[0], "[-all] basedirectory")
+	if len(os.Args) != 2 && len(os.Args) != 3 && len(os.Args) != 4 {
+		fmt.Println("Usage:", os.Args[0], "[-all] [-exit] basedirectory")
 		return
 	}
 	var basedir string = os.Args[len(os.Args)-1]
 	fmt.Println("Program is starting. Directory:", basedir)
 	// basedirectory must be absolute?
 	var regenall *bool = flag.Bool("all", false, "Regenerate all files before setting watches")
+	var exit *bool = flag.Bool("exit", false, "Exit after regenerating all files")
 	flag.Parse()
+	fmt.Println(basedir)
 	fmt.Println(*regenall)
+	fmt.Println(*exit)
+
+	if len(basedir) > 1 && basedir[len(basedir)-1] == '/' {
+		basedir = basedir[:len(basedir)-1]
+	}
+	fmt.Println(basedir)
 
 	//var err error = nil // This would get compiled out right becauase already inititalised right?
 	//var direvent recursivedirwatch.DirEvent
@@ -56,7 +64,7 @@ func main() {
 	var tmpl *template.Template = template.Must(template.New("dirtemplate.html").ParseFiles("dirtemplate.html"))
 
 	var ch chan recursivedirwatch.Event = make(chan recursivedirwatch.Event, 5) // Uber's go style guide says don't use buffered channels but I don't understand why
-	go recursivedirwatch.Watch(basedir, ch, *regenall)
+	go recursivedirwatch.Watch(basedir, ch, *regenall, *exit)
 	for event := range ch {
 		if event.Name == nil || *event.Name != outputfilename {
 			fmt.Println("Making HTML for", event.Dirpath)
@@ -90,6 +98,7 @@ func buildTemplateInputs(directory string, files []os.FileInfo) templatedir {
 			if file.IsDir() {
 				filetype = "DIR"
 				filesize = ""
+				filename += "/"
 			} else {
 				filetype = "FILE"
 				//filesize = filesizestr(uint(math.Ceil(float64(file.Size()) / 1024))) // num kilobytes
@@ -159,7 +168,7 @@ func writeTemplate(location string, tmpl *template.Template, dir templatedir) er
 	defer file.Close()
 	var filewriter = bufio.NewWriter(file)
 	err = tmpl.Execute(filewriter, dir)
-	filewriter.Flush()
+	filewriter.Flush() //err
 	return err
 }
 
