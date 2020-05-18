@@ -94,7 +94,7 @@ func buildTemplateInputs(directory string, files []os.FileInfo) templatedir {
 	var templatedirv templatedir = templatedir{directory, make([]templatefile, 0, len(files))}
 	var filesize string
 	if directory != "" {
-		templatedirv.Files = append(templatedirv.Files, templatefile{"DIR", "../", "/" + stringUpToLast(directory, '/'), "", ""})
+		templatedirv.Files = append(templatedirv.Files, templatefile{"DIR", "../", parentdir(directory), "", ""})
 	}	
 	for _, file := range files {
 		var filename string = file.Name()
@@ -186,13 +186,22 @@ func isReadable(dir string, file os.FileInfo) bool {
 	return true
 }
 
-// Return string up to, but not including, last instance of character 'end' in str
-// If 'end' never appears, return empty string
+// Return string up to and including last instance of character 'end' in str
+// If 'end' never appears, return new string with end as only character
 func stringUpToLast(str string, end byte) string {
 	for i := len(str) - 1; i > 0; i-- {
 		if str[i] == end {
-			return str[:i]
+			return str[:i+1]
 		}
 	}
-	return ""
+	return string(end)
+}
+
+// I feel like there's a better way of doing this
+func parentdir(directory string) string {
+	var parent = stringUpToLast(directory, '/')
+	if parent != "/" {
+		return "/" + parent
+	}
+	return parent
 }
