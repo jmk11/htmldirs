@@ -1,6 +1,9 @@
 /*
 Generate HTML directory listings at .directory.html, recursively within basedir and its subdirectories
 basedirectory must be absolute
+// relative paths require that the uri for a directory welcome page ends in / for the browser to process them properly
+// so what Apache does is redirect you to the uri ending in / if you are looking for a directory
+// This program makes all links relative to basedirectory (with preceding /)
 */
 package main
 
@@ -14,10 +17,10 @@ import (
 	"math"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
-// name
 type templatedir struct {
 	Dirname string
 	Files   []templatefile
@@ -43,6 +46,7 @@ const gb uint = 1024*mb
 const tb uint = 1024*gb*/
 
 func main() {
+	// Process arguments
 	if len(os.Args) != 2 && len(os.Args) != 3 && len(os.Args) != 4 {
 		fmt.Println("Usage:", os.Args[0], "[-all] [-exit] basedirectory")
 		return
@@ -59,25 +63,32 @@ func main() {
 		basedir = basedir[:len(basedir)-1]
 	}
 	fmt.Println("Directory:", basedir)
+	//-------------------------------------------------------------------------
 
-	//var err error = nil // This would get compiled out right becauase already inititalised right?
+	var err error // = nil // This would get compiled out right becauase already inititalised right?
 	//var direvent recursivedirwatch.DirEvent
 	//var files []os.FileInfo
 
 	var tmpl *template.Template = template.Must(template.New("dirtemplate.html").ParseFiles("dirtemplate.html"))
-
-	var ch chan recursivedirwatch.Event = make(chan recursivedirwatch.Event, 5) // Uber's go style guide says don't use buffered channels but I don't understand why
-	go recursivedirwatch.Watch(basedir, ch, *regenall, *exit)
-	for event := range ch {
-		if event.Name == nil || *event.Name != outputfilename {
-			fmt.Println("Making HTML for", event.Dirpath)
-			var files, err = ioutil.ReadDir(event.Dirpath)
+	if *regenall && *exit {
+		err = filepath.Walk(basedir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
-				fmt.Println(err)
-			} else {
-				var dirname, err = makeRelative(basedir, event.Dirpath)
-				var dir templatedir = buildTemplateInputs(dirname, files)
-				err = writeTemplate(event.Dirpath+"/"+outputfilename, tmpl, dir)
+				return err
+			}
+			if info.IsDir() {
+				makeHTML(path, basedir, tmpl)
+			}
+			return nil
+		})
+		if err != nil {
+			fmt.Println(err)
+		}
+	} else {
+		var ch chan recursivedirwatch.Event = make(chan recursivedirwatch.Event, 5) // Uber's go style guide says don't use buffered channels but I don't understand why
+		go recursivedirwatch.Watch(basedir, ch, *regenall)
+		for event := range ch {
+			if event.Name == nil || *event.Name != outputfilename {
+				err = makeHTML(event.Dirpath, basedir, tmpl)
 				if err != nil {
 					fmt.Println(err)
 				}
@@ -86,22 +97,40 @@ func main() {
 	}
 }
 
-// relative paths require that the uri ends in / for the browser to process them properly
-// so what Apache does is redirect you to the uri ending in / if you are looking for a directory
-// Or could make all links relative to base
+func makeHTML(dirpath string, basedir string, tmpl *template.Template) error {
+	fmt.Println("Making HTML for", dirpath)
+	var files, err = ioutil.ReadDir(dirpath) // uses lstat
+	if err != nil {
+		return err
+	}
+	dirname, err := makeRelative(basedir, dirpath)
+	dir, err := buildTemplateInputs(dirpath, dirname, files)
+	if err != nil {
+		return err
+	}
+	err = writeTemplate(dirpath+"/"+outputfilename, tmpl, dir)
+	return err
+}
 
-func buildTemplateInputs(directory string, files []os.FileInfo) templatedir {
+func buildTemplateInputs(path string, relativepath string, files []os.FileInfo) (templatedir, error) {
 	//fmt.Println(directory)
 	//fmt.Println(stringUpToLast(directory, '/'))
 	var filetype string
-	var templatedirv templatedir = templatedir{directory, make([]templatefile, 0, len(files))}
+	var templatedirv templatedir = templatedir{relativepath, make([]templatefile, 0, len(files))}
 	var filesize string
-	if directory != "" {
-		templatedirv.Files = append(templatedirv.Files, templatefile{"DIR", "../", parentdir(directory), "", ""})
-	}	
+	if relativepath != "" {
+		// add parent directory
+		var parentpath string = parentdir(path)
+		parent, err := os.Lstat(parentpath)
+		if err != nil {
+			return templatedir{}, err
+			// what does templatedir{} actually return. Answer: all struct fields zero initialised
+		}
+		templatedirv.Files = append(templatedirv.Files, templatefile{"DIR", "../", "/" + parentdir(relativepath), "", parent.ModTime().Format("02-Jan-2006  15:04:05 MST")})
+	}
 	for _, file := range files {
 		var filename string = file.Name()
-		if file.Mode()&os.ModeSymlink == 0 && filename != outputfilename && isReadable(directory, file) {
+		if file.Mode()&os.ModeSymlink == 0 && filename != outputfilename && isReadable(relativepath, file) {
 			// actually I probably do want to include symlinks
 			if file.IsDir() {
 				filetype = "DIR"
@@ -116,24 +145,22 @@ func buildTemplateInputs(directory string, files []os.FileInfo) templatedir {
 			}
 			var lastmodified string = file.ModTime().Format("02-Jan-2006  15:04:05 MST")
 			var link string
-			if directory == "" {
+			if relativepath == "" {
 				link = "/" + filename
 			} else {
-				link = "/" + directory + "/" + filename
+				link = "/" + relativepath + "/" + filename
 			}
-			//fmt.Println(url.PathEscape(link))
+			//fmt.Println(url.PathEscape(link)) // This encodes slashes... weird
 
 			urlurl, err := url.Parse(link)
 			if err != nil {
-				panic("boom")
+				return templatedir{}, err
 			}
-			//urlurl.Path += link
-			//fmt.Printf("Encoded URL is %q\n", urlurl.String())
 
 			templatedirv.Files = append(templatedirv.Files, templatefile{filetype, filename, urlurl.String(), filesize, lastmodified})
 		}
 	}
-	return templatedirv
+	return templatedirv, nil
 }
 
 /*
@@ -147,7 +174,7 @@ func makeRelative(basedir string, dirpath string) (string, error) {
 	if len(relative) == 1 {
 		return "", nil
 	} else {
-		fmt.Println(relative)
+		//fmt.Println(relative)
 		return relative[1], nil
 	}
 }
@@ -175,6 +202,7 @@ func filesizestr(filesizenum int64) string {
 	// test the sizes with big fake inputs
 	// the numbers printed seem to be a big wrong eg 16MB when computer says 17.2
 	// I changed it a bit since then, try again
+	// I think it is divide by 1024 vs divide by 1000
 }
 
 func writeTemplate(location string, tmpl *template.Template, dir templatedir) error {
@@ -185,7 +213,10 @@ func writeTemplate(location string, tmpl *template.Template, dir templatedir) er
 	defer file.Close()
 	var filewriter = bufio.NewWriter(file)
 	err = tmpl.Execute(filewriter, dir)
-	filewriter.Flush() //err
+	if err != nil {
+		return err
+	}
+	err = filewriter.Flush()
 	return err
 }
 
@@ -198,8 +229,9 @@ func isReadable(dir string, file os.FileInfo) bool {
 	return true
 }
 
-// Return string up to and including last instance of character 'end' in str
+// Return string up to and including last instance of character 'end' in str.
 // If 'end' never appears, return new string with end as only character
+/*
 func stringUpToLast(str string, end byte) string {
 	for i := len(str) - 1; i > 0; i-- {
 		if str[i] == end {
@@ -208,12 +240,36 @@ func stringUpToLast(str string, end byte) string {
 	}
 	return string(end)
 }
+*/
 
 // I feel like there's a better way of doing this
 func parentdir(directory string) string {
-	var parent = stringUpToLast(directory, '/')
-	if parent != "/" {
-		return "/" + parent
+	for i := len(directory) - 1; i > 0; i-- {
+		if directory[i] == '/' {
+			return directory[:i+1]
+		}
 	}
-	return parent
+	return ""
+
+	/*
+		var parent = stringUpToLast(directory, '/')
+		if parent != "/" {
+			return "/" + parent
+		}
+		return parent
+	*/
 }
+
+// maybe use a closure so don't have to make basedir and tmpl global?
+/*
+func walkMakeHTML(path string, info os.FileInfo, err error) error {
+	if err != nil {
+		//fmt.Println(err)
+		return err
+	}
+	if info.IsDir() {
+		makeHTML(path)
+	}
+	return nil
+}
+*/

@@ -1,18 +1,20 @@
-// Package recursivedirwatch uses inotify to watch a directory recursively for file creation, deletion, moving or attribute changes
-// subdirectories added while this is running are also watched
-// Does extra file checking to catch up when speed of adding directories outpaces speed of adding watches
-// Returns inotify events with the watch descriptor replaced with path of edited directory
+/* 
+Package recursivedirwatch uses inotify to watch a directory recursively for file creation, deletion, moving or attribute changes
+subdirectories added while this is running are also watched
+Does extra file checking to catch up when speed of adding directories outpaces speed of adding watches
+Returns inotify events with the watch descriptor replaced with path of parent directory of edited file
 
-// When Dirwatch receives an inotify event:
-// 	if the created/removed/attribd file is not a directory, it sends an event for the parent directory
-// 	if it is a directory:
-// 		if the event is a create or moveto, adds a watch on the directory and all new subdirectories recursively,
-// 			and sends events for the parent directory, the directory and all new subdirectories recursively
-//		if the event is a delete or movedfrom, removes watches from the directory and all its subdirectories recursively
-//		if the event is an ignored, removes wataches from the directory and all its subdirectories if the directory is still being watched
+When Dirwatch receives an inotify event:
+	if the created/removed/attribd file is not a directory, it sends an event for the parent directory
+	if it is a directory:
+		create or moved_to: adds a watch on the directory and all new subdirectories recursively,
+			and sends events for the parent directory, the directory and all new subdirectories recursively
+		delete or moved_from: removes watches from the directory and all its subdirectories recursively
+		ignored: removes wataches from the directory and all its subdirectories if the directory is still being watched
 
-// works better than inotifywait for pasting large, deep directory
-
+Uses filepath.Walk() to add watches initially, which doesn't follow symbolic links.
+Works better (perfectly?) than inotifywait for pasting large, deep directory.
+*/
 package recursivedirwatch
 
 import (
@@ -26,9 +28,10 @@ import (
 	///home/JM/go/src/lukeshuinotifyedit/inotify"
 )
 
-// Event represents an inotify event on the directory in Dirname
+// Event represents an inotify event on a file in the directory in Dirpath
+// Mask, Cookie and Name are simply copied from the inotify event
 type Event struct {
-	Dirpath string       // Name of directory of altered file
+	Dirpath string       // Absolute path of directory of altered file
 	Mask    inotify.Mask // Mask describing event
 	Cookie  uint32       // Unique cookie associating related events (for rename(2))
 	Name    *string      // Optional name of altered file. Not always present on IN_ATTRIB changes.
@@ -46,28 +49,19 @@ var ch chan Event
 // if a directory with deep subdirectories and files is pasted, you probably won't get to put watches on the subdirectories
 // before their subdirectories are created
 
-/*
-// Argument to Watch - 
-const (
-    NoInitial = iota
-    Send
-	SendAndExit
-)
-*/
-
 // Watch must be run as a goroutine.
 //
-// Watch will recursively watch basedir and all its subdirectories, including newly added ones
+// Watch will recursively watch basedir and all its subdirectories, including newly added ones.
 // Whenever a file or directory is created, deleted, moved in, moved out or has its attributes edited, an Event for its parent directory will be pushed into ch.
 // Some events, representing new subdirectories B, C that were added to a new directory A before directory A could be watched,
 // are created by this package ('manufactured events'), not by inotify. These are marked with a mask value of 0.
 // if sendoninitial is true, a manufactured event will be sent for each directory discovered in the initial filepath walk.
-// If exit is true and sendoninitial is true, will finish after initial filepath walk
-// otherwise, will close the channel and finish only on error.
-func Watch(basedir string, _ch chan Event, _sendoninitial bool, exit bool) {
+// Will close the channel and finish only on error. If the function exits, the channel will always be closed first.
+func Watch(basedir string, _ch chan Event, _sendoninitial bool) {
 	var err error
 	ch = _ch
 	sendoninitial = _sendoninitial
+	defer close(ch)
 
 	inot, err = inotify.InotifyInit()
 	if err != nil {
@@ -75,6 +69,7 @@ func Watch(basedir string, _ch chan Event, _sendoninitial bool, exit bool) {
 		return
 	}
 	defer inot.Close()
+	defer fmt.Printf("\n\nSTARTING DIRWATCH DEFERS\n\n")
 
 	//var watches []inotify.Wd
 	//buildWatches(basedir)
@@ -85,35 +80,35 @@ func Watch(basedir string, _ch chan Event, _sendoninitial bool, exit bool) {
 	err = filepath.Walk(basedir, walkAddWatch)
 	if err != nil {
 		fmt.Println(err)
-	} else if sendoninitial == false || exit == false {
-		for err == nil {
-			fmt.Println("Blocking on reading watches...")
-			event, err := inot.ReadBlock()
-			printEvent(event)
-			if err == nil {
-				/*
-					direvent := readevent(event)
-					//fmt.Printf("%x", direvent)
-					if direvent != nil {
-						ch <- *direvent
-					}
-				*/
-				readevent(event, ch)
-			}
-		}
-		fmt.Println(err)
+		return
 	}
-	// TODO: remove watches when exit provided - or don't put on in first place
-	// maybe in case of exit, shouldn't use this at all but just use a filepath walk in main.go
-	close(ch)
-	fmt.Printf("\n\nEXITING DIRWATCH AND ABOUT TO DO DEFERS\n\n")
+	for err == nil {
+		fmt.Println("Blocking on reading watches...")
+		event, err := inot.ReadBlock()
+		printEvent(event)
+		if err == nil {
+			processEvent(event, ch)
+			/*
+				direvent := readevent(event)
+				//fmt.Printf("%x", direvent)
+				if direvent != nil {
+					ch <- *direvent
+				}
+			*/
+		}
+	}
+	fmt.Println(err)
+	// close(ch)
+	//fmt.Printf("\n\nEXITING DIRWATCH AND ABOUT TO DO DEFERS\n\n")
 }
 
+/*
 func failIf(condition bool, message string) {
 	if condition {
 		panic(message)
 	}
 }
+*/
 
 // panic with message failmessage if condition is not true
 func assert(condition bool, failmessage string) {
@@ -122,9 +117,9 @@ func assert(condition bool, failmessage string) {
 	}
 }
 
-// returns true if dirname startswith basedir, else false
-func isSubdir(basedir string, dirname string) bool {
-	return strings.HasPrefix(dirname, basedir)
+// returns true if child startswith parent, else false
+func isSubdir(parent string, child string) bool {
+	return strings.HasPrefix(child, parent)
 }
 
 // Delete watches from watches map and inotify watchlist
@@ -145,7 +140,8 @@ func deleteWatches(watches map[inotify.Wd]string, basedir string) {
 // Process event, creating or deleting watches on directory and its subdirectories if event is on a directory
 // And convert event to DirEvent
 // doesn't need to return event atm
-func readevent(event inotify.Event, _ch chan Event) *Event {
+// what if only added an event if there wasn't already an event in the queue for that directory?
+func processEvent(event inotify.Event, _ch chan Event) {
 	var err error
 	var changedDir string
 	var files []os.FileInfo
@@ -153,9 +149,8 @@ func readevent(event inotify.Event, _ch chan Event) *Event {
 	fmt.Println(changedDir)
 	//if event.Mask&inotify.IN_IGNORED != 0 || event.Mask&inotify.IN_MOVE_SELF != 0 || event.Mask&inotify.IN_DELETE_SELF != 0 {
 	if event.Mask&inotify.IN_Q_OVERFLOW != 0 {
-		return nil
-	}
-	if event.Mask&inotify.IN_IGNORED != 0 {
+		// ignore
+	} else if event.Mask&inotify.IN_IGNORED != 0 {
 		// selfs are dealt with by delete_from, moved_from in parent
 		// not dealing with root itself being moved atm
 		// the only way this will happen that isn't dealt with elsewhere is if filesystem is unmounted afaik
@@ -174,21 +169,21 @@ func readevent(event inotify.Event, _ch chan Event) *Event {
 	} else {
 		assert(ok, "watches[event.Wd] not ok in readevent(). changedDir = "+changedDir)
 		if event.Mask&inotify.IN_ISDIR != 0 && event.Mask&inotify.IN_ATTRIB == 0 { // edited file is a directory
-			endDir := changedDir + "/" + *event.Name
+			fullPath := changedDir + "/" + *event.Name
 			if event.Mask&inotify.IN_DELETE != 0 || event.Mask&inotify.IN_MOVED_FROM != 0 {
 				// directory deleted, unwatch it and its subdirs
-				fmt.Println("Deleting:", endDir)
-				deleteWatches(watches, endDir)
+				fmt.Println("Deleting:", fullPath)
+				deleteWatches(watches, fullPath)
 			}
 			if event.Mask&inotify.IN_CREATE != 0 || event.Mask&inotify.IN_MOVED_TO != 0 {
 				// directory created, possibly copied over with subdirs, so watch it and its subdirs
 				// need to create html files on subdirs based on this information
 				// because this doesn't necessarily receive information about files copied within directory
 				// if lots of files and folders are copied at once
-				files, err = ioutil.ReadDir(endDir)
+				files, err = ioutil.ReadDir(fullPath)
 				if err == nil {
-					fmt.Println("Watching new dirs:", endDir)
-					watchNewDirs(watches, endDir, files, _ch) // also adds events to ch for each new directory including endDir
+					fmt.Println("Watching new dirs:", fullPath)
+					watchNewDirs(watches, fullPath, files, _ch) // also adds events to ch for each new directory including endDir
 				} else {
 					fmt.Println(err)
 				}
@@ -198,9 +193,9 @@ func readevent(event inotify.Event, _ch chan Event) *Event {
 		// send event
 		var direvent Event = Event{changedDir, event.Mask, event.Cookie, event.Name}
 		_ch <- direvent
-		return &direvent // Go will make a copy or put this on the heap or w/e right?
+		//return &direvent // Go will make a copy or put this on the heap or w/e right?
 	}
-	return nil
+	//return nil
 }
 
 /* func sendEvent(dirname string, mask inotify.Mask, cookie uint32, name *string, ch chan Event) {
@@ -220,7 +215,7 @@ func printEvent(event inotify.Event) {
 }
 
 // slow
-func manufactureEvent(dirpath string) Event{
+func manufactureEvent(dirpath string) Event {
 	return Event{dirpath, 0, 0, nil}
 }
 
@@ -229,6 +224,7 @@ func manufactureEvent(dirpath string) Event{
 // one inotify event implies only one new dir, right?
 // wait this should be using filepath walk
 // this may be faster?
+// does this follow symbolic links? If so, it is inconsistent with the initial watching using filepathWalk
 func watchNewDirs(watches map[inotify.Wd]string, changedDir string, files []os.FileInfo, ch chan Event) {
 	addWatch(watches, changedDir)
 	ch <- manufactureEvent(changedDir)
