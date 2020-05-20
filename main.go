@@ -1,3 +1,7 @@
+/*
+Generate HTML directory listings at .directory.html, recursively within basedir and its subdirectories
+basedirectory must be absolute
+*/
 package main
 
 import (
@@ -44,20 +48,17 @@ func main() {
 		return
 	}
 	var basedir string = os.Args[len(os.Args)-1]
-	fmt.Println("Program is starting. Directory:", basedir)
-	// basedirectory must be absolute?
+	//fmt.Println(basedir)
 	var regenall *bool = flag.Bool("all", false, "Regenerate all files before setting watches")
 	var exit *bool = flag.Bool("exit", false, "Exit after regenerating all files")
 	flag.Parse()
-	fmt.Println(basedir)
-	fmt.Println(*regenall)
-	fmt.Println(*exit)
+	//fmt.Println(*regenall, *exit)
 
 	// Remove trailing slash from dirname
 	if len(basedir) > 1 && basedir[len(basedir)-1] == '/' {
 		basedir = basedir[:len(basedir)-1]
 	}
-	fmt.Println(basedir)
+	fmt.Println("Directory:", basedir)
 
 	//var err error = nil // This would get compiled out right becauase already inititalised right?
 	//var direvent recursivedirwatch.DirEvent

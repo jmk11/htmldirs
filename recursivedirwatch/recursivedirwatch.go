@@ -273,8 +273,8 @@ func buildWatches(directory string) error {
 // deal with err?
 func walkAddWatch(path string, info os.FileInfo, err error) error {
 	if err != nil {
-		fmt.Println(err)
-		return nil
+		//fmt.Println(err)
+		return err
 	}
 	if info.IsDir() {
 		if sendoninitial {
