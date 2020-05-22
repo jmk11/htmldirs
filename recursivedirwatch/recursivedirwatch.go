@@ -15,9 +15,8 @@ When Dirwatch receives an inotify event:
 Uses filepath.Walk() to add watches initially, which doesn't follow symbolic links.
 Works better (perfectly?) than inotifywait for pasting large, deep directory.
 
-The inotify interaction, including the types, inotifyInit() and readEvent(), is adapted from Luke Shumaker's (lukeshu@sbcglobal.net) libgnulinux/inotify package (LGPL)
+The inotify interaction, including the types, inotifyInit() and readEvent(), is adapted from Luke Shumaker's (lukeshu@sbcglobal.net) libgnulinux/inotify package (GNU LGPL 2.1+)
 https://git.lukeshu.com/go/libgnulinux/
-
 */
 package recursivedirwatch
 
@@ -56,12 +55,14 @@ type inotify struct {
 	buffFull [4096]byte
 	buff     []byte
 	buffErr  error
+
+	watches map[wd]string
 }
 
-var watches map[wd]string
-var inot *inotify
-var sendoninitial bool = false // name
-var ch chan Event
+//var watches map[wd]string
+//var inot *inotify
+//var sendoninitial bool = false // name
+//var ch chan Event
 // these need to be global so walkFn for filepath.Walk() can access them
 // could use closure
 
@@ -69,21 +70,23 @@ var ch chan Event
 //
 // Watch will recursively watch basedir and all its subdirectories, including newly added ones.
 // Whenever a file or directory is created, deleted, moved in, moved out or has its attributes edited, an Event for its parent directory will be pushed into ch.
-// Some events, representing new subdirectories B, C that were added to a new directory A before directory A could be watched,
-// are created by this package ('manufactured events'), not by inotify. These are marked with a mask value of 0.
+// 
+// Manufactured events: Some events, representing new subdirectories B, C that were added to a new directory A before directory A could be watched,
+// are created by this package, not by inotify. These are marked with a mask value of 0.
 // if sendoninitial is true, a manufactured event will be sent for each directory discovered in the initial filepath walk.
+// 
 // Will close the channel and finish only on error. If the function exits, the channel will always be closed first.
-func Watch(basedir string, _ch chan Event, _sendoninitial bool) {
+func Watch(basedir string, ch chan Event, sendoninitial bool) {
 	var err error
-	ch = _ch
-	sendoninitial = _sendoninitial
+	//ch = _ch
+	//sendoninitial = _sendoninitial
 	defer close(ch)
 
-	inot, err = inotifyInit()
+	inot, err := inotifyInit()
 	defer unix.Close(int(inot.fd))
 
-	watches = make(map[wd]string)
-	err = filepath.Walk(basedir, walkAddWatch)
+	inot.watches = make(map[wd]string)
+	err = filepath.Walk(basedir, genAddWatchWalkFn(inot, ch, sendoninitial))
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -92,9 +95,9 @@ func Watch(basedir string, _ch chan Event, _sendoninitial bool) {
 	for err == nil {
 		//fmt.Println("Blocking on reading watches...")
 		event, err := inot.readEvent()
-		printEvent(event)
+		//printEvent(event)
 		if err == nil {
-			processEvent(event, ch)
+			processEvent(inot, event, ch)
 		}
 	}
 	fmt.Println(err)
@@ -120,30 +123,10 @@ func isSubdir(parent string, child string) bool {
 	return strings.HasPrefix(child, parent)
 }
 
-// Delete watches from watches map and inotify watchlist
-// Deletes all watches inside basedir, including basedir
-// Maybe I should make a second hash table hashed in the opposite direction
-// prob not worth it
-// deleting watches in response to file deletion probably not necessary, should be removed automatically by inotify?
-func deleteWatches(watches map[wd]string, basedir string) {
-	// can't do with filepath.Walk() because the directories don't exist anymore...
-	// so have to do based on file names
-	for wd, dirname := range watches {
-		if isSubdir(basedir, dirname) {
-			delete(watches, wd)
-			_, err := unix.InotifyRmWatch(int(inot.fd), uint32(wd))
-			if err != nil {
-				// do something?
-			}
-			// unix.InotifyRmWatch should take wd as a int, to be consistent with AddWatch and the underlying system call
-		}
-	}
-}
-
 // Process event, creating or deleting watches on directory and its subdirectories if event is on a directory.
 // what if only added an event if there wasn't already an event in the queue for that directory?
 // bad name
-func processEvent(event Event, _ch chan Event) {
+func processEvent(inot *inotify, event Event, ch chan Event) {
 	//var err error
 	if event.Mask&unix.IN_IGNORED != 0 {
 		// delete_self and move_self etc. are dealt with by delete, moved_from in parent
@@ -154,7 +137,7 @@ func processEvent(event Event, _ch chan Event) {
 		// results in doubling because when I delete the watch, in_ignored is generated
 		fmt.Printf("\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\nIN_IGNORED\n!!!!!!!!!!!!!!!!!!!!!!!!!\n\n")
 		fmt.Println("Deleting:", event.Dirpath)
-		deleteWatches(watches, event.Dirpath)
+		inot.deleteWatches(event.Dirpath)
 		// I could just delete here instead of using if delete block below
 		// But I have an idea that in earlier testing IN_IGNORED seemed unreliable
 	} else {
@@ -162,18 +145,17 @@ func processEvent(event Event, _ch chan Event) {
 			fullPath := event.Dirpath + "/" + *event.Name
 			if event.Mask&unix.IN_DELETE != 0 || event.Mask&unix.IN_MOVED_FROM != 0 {
 				// directory deleted, unwatch it and its subdirs
-				fmt.Println("Deleting:", fullPath)
-				deleteWatches(watches, fullPath)
+				//fmt.Println("Deleting:", fullPath)
+				inot.deleteWatches(fullPath)
 			}
 			if event.Mask&unix.IN_CREATE != 0 || event.Mask&unix.IN_MOVED_TO != 0 {
 				// directory created, possibly copied over with subdirs, so watch it and its subdirs
-				fmt.Println("Watching new dirs:", fullPath)
-				watchNewDirs(watches, fullPath, ch)
+				//fmt.Println("Watching new dirs:", fullPath)
+				inot.watchNewDirs(fullPath, ch)
 			}
 		}
 		// send event
-		//var direvent Event = Event{changedDir, event.Mask, event.Cookie, event.Name}
-		_ch <- event
+		ch <- event
 	}
 }
 
@@ -182,15 +164,15 @@ func processEvent(event Event, _ch chan Event) {
 	ch <- direvent
 } */
 
-// print an Event for debugging
-func printEvent(event Event) {
+// PrintEvent prints an event for debugging
+func PrintEvent(event Event) {
 	var name string
 	if event.Name == nil {
 		name = "nil"
 	} else {
 		name = *event.Name
 	}
-	fmt.Println(event.Dirpath, event.Mask.String(), event.Cookie, name)
+	fmt.Println(event.Dirpath, event.Mask/* .String() */, event.Cookie, name)
 	// printing event.Mask doesn't seem to use String()?
 }
 
@@ -203,8 +185,8 @@ func manufactureEvent(dirpath string) Event {
 // wait this should be using filepath walk
 // this may be faster?
 // does this follow symbolic links? If so, it is inconsistent with the initial watching using filepathWalk
-func watchNewDirs(watches map[wd]string, newDir string, ch chan Event) {
-	addWatch(watches, newDir)
+func (in *inotify) watchNewDirs(newDir string, ch chan Event) {
+	in.addWatch(newDir)
 	ch <- manufactureEvent(newDir)
 
 	files, err := ioutil.ReadDir(newDir)
@@ -213,8 +195,9 @@ func watchNewDirs(watches map[wd]string, newDir string, ch chan Event) {
 		for _, file := range files {
 			if file.IsDir() {
 				path := pathprefix + file.Name()
-				if mapGetKey(watches, path) == nil {
-					watchNewDirs(watches, path, ch)
+				//if mapGetKey(watches, path) == nil {
+				if ! mapHasValue(in.watches, path) {
+					in.watchNewDirs(path, ch)
 				}
 			}
 		}
@@ -224,6 +207,7 @@ func watchNewDirs(watches map[wd]string, newDir string, ch chan Event) {
 }
 
 // return map key with value v, or nil if none
+/*
 func mapGetKey(m map[wd]string, v string) *wd {
 	for key, value := range m {
 		if value == v {
@@ -231,6 +215,31 @@ func mapGetKey(m map[wd]string, v string) *wd {
 		}
 	}
 	return nil
+}
+*/
+
+/*
+type watchesMap map[wd]string
+
+// return true if map has a value == v, false if not
+func (m watchesMap) containsValue(v string) bool {
+	for _, value := range m {
+		if value == v {
+			return true
+		}
+	}
+	return false
+}
+*/
+
+// return true if map has a value == v, false if not
+func mapHasValue(m map[wd]string, v string) bool {
+	for _, value := range m {
+		if value == v {
+			return true
+		}
+	}
+	return false
 }
 
 /*
@@ -240,8 +249,25 @@ func buildWatches(directory string) error {
 }
 */
 
-// maybe use a closure so don't have to make ch and watches global?
 // deal with err?
+// Returns walkFn for adding watches
+func genAddWatchWalkFn(inot *inotify, ch chan Event, sendoninitial bool) func(string, os.FileInfo, error) error {
+	return func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if sendoninitial {
+				ch <- manufactureEvent(path)
+			}
+			return inot.addWatch(path)
+		}
+		return nil
+	}
+}
+
+// deal with err?
+/*
 func walkAddWatch(path string, info os.FileInfo, err error) error {
 	if err != nil {
 		return err
@@ -254,19 +280,40 @@ func walkAddWatch(path string, info os.FileInfo, err error) error {
 	}
 	return nil
 }
+*/
 
 // Add a watch on path to inotify and to watches
-func addWatch(watches map[wd]string, path string) error {
-	wde, err := unix.InotifyAddWatch(int(inot.fd), path, unix.IN_CREATE|unix.IN_ATTRIB|unix.IN_DELETE|unix.IN_MOVED_TO|unix.IN_MOVED_FROM|unix.IN_IGNORED|unix.IN_ONLYDIR) // unix.IN_MODIFY
+func (in *inotify) addWatch(path string) error {
+	wde, err := unix.InotifyAddWatch(int(in.fd), path, unix.IN_CREATE|unix.IN_ATTRIB|unix.IN_DELETE|unix.IN_MOVED_TO|unix.IN_MOVED_FROM|unix.IN_IGNORED|unix.IN_ONLYDIR) // unix.IN_MODIFY
 	if err != nil {
 		return err
 	}
-	watches[wd(wde)] = path
+	in.watches[wd(wde)] = path
 	return nil
+}
+
+// Delete watches on basedir and its subdirectories (recursively) from watches map and inotify watchlist
+// Maybe I should make a second hash table hashed in the opposite direction
+// prob not worth it
+// deleting watches in response to file deletion probably not necessary, should be removed automatically by inotify?
+func (in *inotify) deleteWatches(basedir string) {
+	// can't do with filepath.Walk() because the directories don't exist anymore...
+	// so have to do based on file names
+	for wd, dirname := range in.watches {
+		if isSubdir(basedir, dirname) {
+			delete(in.watches, wd)
+			_, err := unix.InotifyRmWatch(int(in.fd), uint32(wd))
+			if err != nil {
+				// do something?
+			}
+			// unix.InotifyRmWatch should take wd as an int, to be consistent with AddWatch and the system call
+		}
+	}
 }
 
 //--------------------------------------------------------------------------
 func (in *inotify) readEvent() (Event, error) {
+	//START:
 	if len(in.buff) == 0 { // buffer empty, fill it again
 		if in.buffErr != nil {
 			return Event{}, in.buffErr
@@ -285,12 +332,14 @@ func (in *inotify) readEvent() (Event, error) {
 		return Event{}, in.buffErr
 	}
 	raw := (*unix.InotifyEvent)(unsafe.Pointer(&in.buff[0]))
-	dirpath, ok := watches[wd(raw.Wd)]
+	dirpath, ok := in.watches[wd(raw.Wd)]
 	if !ok {
 		// ignore this event, look for next one - it is an IN_IGNORED on a watch that has already been removed, or it is an IN_Q_OVERFLOW or ...
-		// maybe shouldn't do this, what if get lots of duplicate IN_IGNORED and run out of stack space
+		// maybe shouldn't do this recursion, what if get lots of duplicate IN_IGNORED and run out of stack space
+		// I looked at the assembly, it is compiled as a call
 		in.buff = in.buff[unix.SizeofInotifyEvent+raw.Len:]
 		return in.readEvent()
+		//goto START
 		// return Error.New("ignore event")
 	}
 	ret := Event{

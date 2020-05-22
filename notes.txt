@@ -1,0 +1,2 @@
+Renames generate two events: one for the MOVED_FROM, and one for the MOVED_TO
+How stop this? Could store cookie from MOVED_FROM, and only send an event for it if after some time if a MOVED_TO with same cookie never appears. But that def sounds not worth it.

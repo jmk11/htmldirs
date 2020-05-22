@@ -87,6 +87,7 @@ func main() {
 		var ch chan recursivedirwatch.Event = make(chan recursivedirwatch.Event, 5) // Uber's go style guide says don't use buffered channels but I don't understand why
 		go recursivedirwatch.Watch(basedir, ch, *regenall)
 		for event := range ch {
+			//recursivedirwatch.PrintEvent(event)
 			if event.Name == nil || *event.Name != outputfilename {
 				err = makeHTML(event.Dirpath, basedir, tmpl)
 				if err != nil {
@@ -103,8 +104,8 @@ func makeHTML(dirpath string, basedir string, tmpl *template.Template) error {
 	if err != nil {
 		return err
 	}
-	dirname, err := makeRelative(basedir, dirpath)
-	dir, err := buildTemplateInputs(dirpath, dirname, files)
+	relpath := makeRelative(basedir, dirpath)
+	dir, err := buildTemplateInputs(dirpath, relpath, files)
 	if err != nil {
 		return err
 	}
@@ -166,16 +167,15 @@ func buildTemplateInputs(path string, relativepath string, files []os.FileInfo) 
 /*
  Find a better way of doing this
 */
-func makeRelative(basedir string, dirpath string) (string, error) {
+func makeRelative(basedir string, dirpath string) string {
 	// if basedir is prefix of dirpath, return dirpath - basedir
 	// return a slice of string following basedir prefix
 	// splitafter?
 	var relative []string = strings.Split(dirpath, basedir+"/")
-	if len(relative) == 1 {
-		return "", nil
+	if len(relative) < 2 {
+		return ""
 	} else {
-		//fmt.Println(relative)
-		return relative[1], nil
+		return relative[1]
 	}
 }
 
@@ -231,18 +231,9 @@ func isReadable(dir string, file os.FileInfo) bool {
 
 // Return string up to and including last instance of character 'end' in str.
 // If 'end' never appears, return new string with end as only character
-/*
-func stringUpToLast(str string, end byte) string {
-	for i := len(str) - 1; i > 0; i-- {
-		if str[i] == end {
-			return str[:i+1]
-		}
-	}
-	return string(end)
-}
-*/
+// func stringUpToLast {}
 
-// I feel like there's a better way of doing this
+// stringUpToLast
 func parentdir(directory string) string {
 	for i := len(directory) - 1; i > 0; i-- {
 		if directory[i] == '/' {
